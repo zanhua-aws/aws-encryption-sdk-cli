@@ -201,6 +201,32 @@ def _build_parser():
     )
     parser.add_dummy_redirect_argument("--decrypt-unsigned")
 
+    # kms_public_group = operating_action.add_argument_group()
+    operating_action.add_argument(
+        "--encrypt-with-kms-public",
+        dest="action",
+        action="store_const",
+        const="encrypt-with-kms-public",
+        help="Encrypt data with a kms public key"
+    )
+    parser.add_dummy_redirect_argument("--encrypt-with-kms-public")
+    parser.add_argument(
+        "--public-key-file",
+        required=False,
+        dest="public_key_file",
+        action=UniqueStoreAction,
+        help="File path of the public kms key when --encrypt-with-kms-public option is enabled.",
+    )
+    # parser.add_dummy_redirect_argument("--public-key")
+    parser.add_argument(
+        "--public-key-id",
+        required=False,
+        dest="public_key_id",
+        action=UniqueStoreAction,
+        help="The kms key id to use when --encrypt-with-kms-public option is enabled.",
+    )
+    # parser.add_dummy_redirect_argument("--public-key-id")
+
     # For each argument added to this group, a dummy redirect argument must
     # be added to the parent parser for each long form option string.
     metadata_group = parser.add_mutually_exclusive_group(required=True)
@@ -232,7 +258,7 @@ def _build_parser():
         nargs="+",
         dest="wrapping_keys",
         action="append",
-        required=True,
+        required=False,
         help=(
             "Identifying information for a wrapping key provider and wrapping keys. Each instance must include "
             "a wrapping key provider identifier and identifiers for one or more wrapping key supplied by that "
@@ -245,7 +271,7 @@ def _build_parser():
         "--commitment-policy",
         type=CommitmentPolicyArgs,
         choices=list(CommitmentPolicyArgs),
-        default=CommitmentPolicyArgs.REQUIRE_ENCRYPT_REQUIRE_DECRYPT,
+        default=None,
         help=(
             "Specifies the commitment policy for key commitment. "
             "ex: "
@@ -642,6 +668,18 @@ def parse_args(raw_args=None):
                 'Found invalid argument "{actual}". Did you mean "-{actual}"?'.format(actual=parsed_args.dummy_redirect)
             )
 
+        if parsed_args.action != "encrypt-with-kms-public":
+            if parsed_args.wrapping_keys is None:
+                raise ParameterParseError("missing --wrapping-keys")
+        elif parsed_args.wrapping_keys is not None:
+            raise ParameterParseError("should not use --wrapping-keys together with --encrypt-with-kms-public")
+        elif parsed_args.public_key_id is None:
+            raise ParameterParseError("missing --public-key-id")
+
+        # set default commitment_policy
+        if parsed_args.commitment_policy is None:
+            parsed_args.commitment_policy = CommitmentPolicyArgs.REQUIRE_ENCRYPT_REQUIRE_DECRYPT
+
         # We add the 'required_encryption_context_keys' to arg parse, even though it is not
         # meant to be used by customers, so that we can  pass the parsed arguments around internally
         if parsed_args.required_encryption_context_keys is not None:
@@ -650,9 +688,10 @@ def parse_args(raw_args=None):
         if parsed_args.overwrite_metadata:
             parsed_args.metadata_output.force_overwrite()
 
-        parsed_args.wrapping_keys = _process_wrapping_key_provider_configs(
-            parsed_args.wrapping_keys, parsed_args.action
-        )
+        if parsed_args.action != "encrypt-with-kms-public":
+            parsed_args.wrapping_keys = _process_wrapping_key_provider_configs(
+                parsed_args.wrapping_keys, parsed_args.action
+            )
 
         # mypy does not appear to understand nargs="+" behavior
         parsed_args.encryption_context, parsed_args.required_encryption_context_keys = _process_encryption_context(

@@ -21,6 +21,7 @@ from argparse import Namespace  # noqa pylint: disable=unused-import
 import aws_encryption_sdk
 from aws_encryption_sdk.materials_managers import CommitmentPolicy
 from aws_encryption_sdk.materials_managers.base import CryptoMaterialsManager  # noqa pylint: disable=unused-import
+from aws_encryption_sdk.key_providers.kms import KMSAsymmetricKeyProvider
 
 from aws_encryption_sdk_cli.compatability import _warn_deprecated_python
 from aws_encryption_sdk_cli.exceptions import AWSEncryptionSDKCLIError, BadUserArgumentError
@@ -237,6 +238,26 @@ def stream_kwargs_from_args(args, crypto_materials_manager):
     :returns: Translated kwargs object for aws_encryption_sdk.stream
     :rtype: dict
     """
+    if args.action == "encrypt-with-kms-public":
+
+        # kms_kwargs = dict(key_ids=[key_arn], key_paths={key_arn:"pub.bin"})
+        kms_kwargs = dict(key_ids=[args.public_key_id])
+        if args.public_key_file is not None:
+            kms_kwargs["key_paths"]={args.public_key_id: args.public_key_file}
+        master_key_provider = KMSAsymmetricKeyProvider(**kms_kwargs)
+
+        stream_args= {
+            "mode": 'encrypt',
+            'algorithm': aws_encryption_sdk.Algorithm.AES_256_GCM_HKDF_SHA512_COMMIT_KEY,
+            "key_provider":master_key_provider
+        }
+        if args.algorithm is not None:
+            stream_args["algorithm"] = getattr(aws_encryption_sdk.Algorithm, args.algorithm)
+        if args.max_length is not None:
+            stream_args["max_body_length"] = args.max_length
+        args.action == "encrypt"
+        return stream_args
+
     stream_args = {"materials_manager": crypto_materials_manager, "mode": args.action}
     # Look for additional arguments only if encrypting
     if args.action == "encrypt":
@@ -279,11 +300,13 @@ def cli(raw_args=None):
 
         _warn_deprecated_python()
 
-        crypto_materials_manager = build_crypto_materials_manager_from_args(
-            key_providers_config=args.wrapping_keys, caching_config=args.caching
-        )
-
-        stream_args = stream_kwargs_from_args(args, crypto_materials_manager)
+        if args.action != "encrypt-with-kms-public":
+            crypto_materials_manager = build_crypto_materials_manager_from_args(
+                key_providers_config=args.wrapping_keys, caching_config=args.caching
+            )
+            stream_args = stream_kwargs_from_args(args, crypto_materials_manager)
+        else:
+            stream_args = stream_kwargs_from_args(args, None)
 
         process_cli_request(stream_args, args)
 
